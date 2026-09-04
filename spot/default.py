@@ -60,8 +60,16 @@ DEFAULT_CONFIG = {
     # ------------------------------------------------------------------
     "abundance": "thevenin",            # preset: 'thevenin' (from default/THEVENIN)
     "lines": "default",                 # preset: 'default' (from default/LINES)
-    "atmosphere": "hot11",              # preset model used when the initial
-                                        # guess is given as a name
+    # initial-guess atmosphere of an inversion when no explicit `initial`
+    # is passed: 'auto' = run the bundled neural operator
+    # (config['network_preset'], e.g. hinode_sp) on the target profiles
+    # first and use its atmospheric parameters as the initial guess
+    # (recommended: an order of magnitude faster convergence to the same
+    # chi2 — see the demo 08 configuration search); any preset name
+    # (e.g. 'hot11') or an explicit path is used directly instead.
+    "atmosphere": "auto",
+    # neural-operator preset used by the 'auto' initial guess
+    "network_preset": "hinode_sp",
 
     # ------------------------------------------------------------------
     # synthesis options
@@ -122,25 +130,33 @@ DEFAULT_CONFIG = {
 
     # ------------------------------------------------------------------
     # inversion options
+    #
+    # Defaults = the RECOMMENDED fast pipeline (demo 08 configuration
+    # search): the 'auto' network initial guess (see "atmosphere" above)
+    # followed by the classical 4-cycle node schedule with fast response
+    # functions, S/N-based sigma and NO hydrostatic-Pe boundary
+    # condition — reaches chi2 ~6e-2 in ~100 s on the Hinode SP test
+    # case (vs ~2500 s for the previous hot11-guess + hse setup).
     # ------------------------------------------------------------------
     "inversion": {
-        # number of nodes per physical quantity (0 = fixed, not inverted)
+        # number of nodes per physical quantity (0 = fixed, not inverted).
         # each value may be an int (same for every cycle) or a list of
-        # ints (one entry per cycle: successive cycles refine the model
-        # with an increasing number of nodes).
+        # ints (one entry per cycle); "auto" = the node count of that
+        # cycle is chosen automatically from the chi2 derivative
+        # (final cycle of the 4-cycle schedule below).
         "nodes": {
-            "T": [5, 8],
+            "T": [2, 3, 4, "auto"],
             "Pe": 0,          # Pe not inverted (kept from the initial guess)
-            "B": [3, 5],
-            "gamma": [2, 3],
-            "phi": [2, 3],
-            "vlos": [3, 5],
-            "vmic": 1,
+            "B": [1, 2, 3, "auto"],
+            "gamma": [1, 2, 2, "auto"],
+            "phi": [1, 2, 2, "auto"],
+            "vlos": [1, 2, 3, "auto"],
+            "vmic": 0,
             "vmac": 0,
         },
-        "max_cycles": 2,                # number of cycles (node sets)
-        "max_iterations": 20,           # LM iterations per cycle
-        "chi2_tolerance": 1e-8,         # relative chi2 change for convergence
+        "max_cycles": 4,                # number of cycles (node sets)
+        "max_iterations": 80,           # LM iterations per cycle
+        "chi2_tolerance": 1e-10,        # relative chi2 change for convergence
         "lambda0": 1e-3,                # initial Marquardt damping
         "lambda_max": 1e10,
         "lambda_factor": 10.0,          # damping increase on rejection
@@ -154,7 +170,7 @@ DEFAULT_CONFIG = {
         },
         "svd_tolerance": 1e-4,          # singular-value threshold (relative),
                                         # the reference default (tol = 1e-4)
-        "sigma": "auto",                # noise per Stokes sample: 'auto'
+        "sigma": "sir",                 # noise per Stokes sample: 'auto'
                                         # (0.118*sqrt(max|I|) for I,
                                         # 0.204*sqrt(max|I|) for Q/U/V,
                                         # per column), 'sir' (derive the
@@ -163,8 +179,8 @@ DEFAULT_CONFIG = {
                                         # or an array/tensor of shape (4, Nw)
                                         # or (Nb, 4, Nw)
         "snr": 1000.0,                  # S/N used by the sigma='sir' scheme
-        "stokes_weights": [1.0, 1.0, 1.0, 1.0],   # I:Q:U:V weights used by the
-                                                  # sigma='sir' scheme
+        "stokes_weights": [1.0, 5.0, 5.0, 10.0],   # I:Q:U:V weights used by
+                                                  # the sigma='sir' scheme
         "compute_errors": True,         # compute parameter errors from the
                                         # covariance matrix at the solution
         # hydrostatic gas-pressure boundary condition: gas pressure
@@ -172,7 +188,11 @@ DEFAULT_CONFIG = {
         # not inverted, every trial atmosphere has its Pe stratification
         # recomputed from hydrostatic equilibrium (e.g. a surface gas
         # pressure of 500 dyn/cm^2); 0 = keep Pe as the boundary condition
-        # (left unchanged).
+        # (left unchanged).  With the 'auto' network initial guess the
+        # network Pe already matches the target closely, so the default 0
+        # is both faster (no per-iteration hydrostatic recompute) and
+        # accurate — the previous hot11-guess defaults needed hse to fix
+        # the Pe mismatch (see the demo 08 search).
         "hse_pg0": 0.0,
         "verbose": True,
         "log_history": True,            # store chi2 per iteration

@@ -80,7 +80,28 @@ stokes, rf = syn(wavs, ltau, atmos, return_rf=True)
 print(rf.shape)   # (1, 112, 4, 6*Nt+2)，dI/dx 对打包大气向量
 ```
 
-#### 3. 反演（CMA-ES 初值搜索 + LM 自动节点数）
+#### 3. 反演（默认推荐流程：网络初猜 → 4 轮节点 LM，一键调用）
+
+```python
+from spot import Inversion
+
+# 不传任何 inversion 设置即可使用默认推荐配置：
+#   atmosphere='auto'（先用 spot.net 的 hinode_sp 网络反演目标谱线得到初猜）
+#   + 4 轮节点表 [2,3,4,auto]（T/B/gamma/phi/vlos）
+#   + fast 响应函数 + sigma='sir' (snr=1000) + 权重 1:5:5:10 + 无 hse
+# Hinode SP 测试算例上：chi2 ≈ 0.05-0.06，约 130 s
+# （对照：hot11 初猜 + 老默认 + hse 的完整 4 轮反演 ~2500 s，chi2 ~7e-2）
+res = Inversion().invert(wavs, ltau, target)   # initial=None -> 网络初猜
+print(res.chi2, res.atmos)                     # (Nb,) chi2 与最终大气
+
+# 想回到传统初猜（如 hot11）或指定别的初猜：
+res = Inversion().invert(wavs, ltau, target, initial="hot11")
+```
+
+如果需要更极致精度：`config["inversion"] = {"nodes": {..., "auto"}, "hse_pg0": 500}` 等变体
+可在 demo/08_net_guess_search 中对比参考（chi2 ~2e-2，~890 s）。
+
+#### 3b. 反演（自定义：CMA-ES 初值搜索 + LM 自动节点数）
 
 ```python
 from spot import CmaesInversion, Inversion
@@ -134,7 +155,7 @@ spot/
 * 单位：波长 [Angstrom]，`ltau = log10(tau5000)`，T [K]，Pe [dyn/cm²]，B [G]，角度 [deg]，速度 [km/s]；
 * 大气向量：`[T, Pe, B, gamma, phi, vlos (每层) , vmic(标量), vmac(标量)]`，`Nx = 6*Nt + 2`；
 * 合成：`solver`（hermitian/cn/delo）、`continuum_opacity`（mihalas/atlas/opacity_project）、`macroturbulence`、`normalize_continuum`、`rf_method`（fast/autograd/analytic/analytic_chain/finite_diff）；
-* 反演：`nodes`（每量的节点数，list = 每循环一个值，`"auto"` = 自动节点数）、`max_cycles`、`max_iterations`、`lambda0/lambda_factor`（LM 阻尼）、`sigma`（噪声模型）、`hse_pg0`（表面压强边界条件，>0 时按流体静力平衡重算 Pe）、`svd_tolerance`；
+* 反演：`atmosphere='auto'`（默认：先调 `spot.net` 网络（`network_preset`）对目标谱线反演出初猜）＋ `nodes`（每量的节点数，list = 每循环一个值，`"auto"` = 自动节点数）、`max_cycles=4`、`max_iterations=80`、`sigma='sir'`+`snr=1000`+`stokes_weights=[1,5,5,10]`、`hse_pg0=0`（默认推荐流程，详见快速上手 3）、`lambda0/lambda_factor`（LM 阻尼）、`svd_tolerance`；
 * CMA-ES：`population`、`sigma0`、`scale`、`bounds`、`covariance_mode`、`stall`、`hse_refresh`。
 
 ### 数据与预设
@@ -237,7 +258,28 @@ stokes, rf = syn(wavs, ltau, atmos, return_rf=True)
 print(rf.shape)   # (1, 112, 4, 6*Nt+2): dI/dx wrt the packed atmosphere
 ```
 
-#### 3. Inversion (CMA-ES warm start + LM with automatic node counts)
+#### 3. Inversion (default recommended flow: network guess -> 4-cycle node LM)
+
+```python
+from spot import Inversion
+
+# No inversion settings needed - the defaults are the recommended flow:
+#   atmosphere='auto' (the spot.net hinode_sp network inverts the target
+#   profiles first) + 4-cycle node schedule [2,3,4,auto] (T/B/gamma/phi/vlos)
+#   + fast response functions + sigma='sir' (snr=1000) + weights 1:5:5:10
+#   + no hse.  Hinode SP test case: chi2 ~ 0.05-0.06 in ~130 s
+#   (vs ~2500 s / chi2 ~7e-2 for the old hot11-guess + hse 4-cycle flow).
+res = Inversion().invert(wavs, ltau, target)   # initial=None -> network guess
+print(res.chi2, res.atmos)                     # (Nb,) chi2 + final atmosphere
+
+# Traditional preset initial guess (e.g. hot11) or explicit initial:
+res = Inversion().invert(wavs, ltau, target, initial="hot11")
+```
+
+For maximum accuracy see the variant matrix in demo/08_net_guess_search
+(e.g. automatic nodes + hse=500: chi2 ~2e-2 in ~890 s).
+
+#### 3b. Inversion (custom: CMA-ES warm start + LM with automatic node counts)
 
 ```python
 from spot import CmaesInversion, Inversion
@@ -295,11 +337,13 @@ spot/
 * Synthesis: `solver` (hermitian/cn/delo), `continuum_opacity`
   (mihalas/atlas/opacity_project), `macroturbulence`, `normalize_continuum`,
   `rf_method` (fast/autograd/analytic/analytic_chain/finite_diff);
-* Inversion: `nodes` (nodes per quantity; list = one value per cycle,
-  `"auto"` = automatic node counts), `max_cycles`, `max_iterations`,
-  `lambda0/lambda_factor` (LM damping), `sigma` (noise model), `hse_pg0`
-  (surface gas pressure; when > 0 and Pe is not inverted, Pe is rebuilt
-  from hydrostatic equilibrium), `svd_tolerance`;
+* Inversion: `atmosphere='auto'` (default: the `spot.net` operator
+  (`network_preset`) inverts the target profiles first for the initial
+  guess) + `nodes` (nodes per quantity; list = one value per cycle,
+  `"auto"` = automatic node counts), `max_cycles=4`, `max_iterations=80`,
+  `sigma='sir'`+`snr=1000`+`stokes_weights=[1,5,5,10]`, `hse_pg0=0`
+  (the default recommended flow, see quick start 3),
+  `lambda0/lambda_factor` (LM damping), `svd_tolerance`;
 * CMA-ES: `population`, `sigma0`, `scale`, `bounds`, `covariance_mode`,
   `stall`, `hse_refresh`.
 

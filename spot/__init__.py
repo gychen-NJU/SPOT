@@ -31,7 +31,7 @@ Email  : gychen@smail.nju.edu.cn
 from .config import merge_config, update_config
 from .default import DEFAULT_CONFIG
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Guoyin Chen"
 __email__ = "gychen@smail.nju.edu.cn"
 

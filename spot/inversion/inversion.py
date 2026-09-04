@@ -131,6 +131,84 @@ class Inversion:
         self._wavs_cache = None
 
     # ------------------------------------------------------------------
+    # default initial guess (the recommended 'auto' flow)
+    # ------------------------------------------------------------------
+    def _default_initial(self, wavs, ltau, target):
+        """Resolve the initial guess when the caller passes ``initial=None``.
+
+        ``config['atmosphere'] == 'auto'`` (the default) runs the bundled
+        neural operator (``config['network_preset']``, e.g. 'hinode_sp')
+        on the target profiles and returns the inferred atmosphere
+        interpolated onto ``ltau``; any other value (preset name, file
+        path, dict, tensor) is forwarded unchanged.
+        """
+        if self.config["atmosphere"] != "auto":
+            return self.config["atmosphere"]
+        return self._network_initial_guess(wavs, ltau, target)
+
+    def _network_initial_guess(self, wavs, ltau, target):
+        """Network-based initial guess (recommended default flow).
+
+        The neural operator inverts the target Stokes profiles (expected
+        in spot's forward convention: continuum-normalized I/Ic; they are
+        restored to physical units with the preset input scale before the
+        network call).  The operator operates on its own 64-level grid
+        (log tau = linspace(-4, 2, 64), index 0 = TOP layer); the inferred
+        depth profiles are interpolated onto ``ltau`` (decreasing, index 0
+        = deepest) and packed into the standard atmosphere vector.
+        """
+        import numpy as _np
+        from ..utils.interpolation import interp_to_grid
+        from ..net import PRESETS, StokesInference
+
+        preset = self.config.get("network_preset", "hinode_sp")
+        if preset not in PRESETS:
+            raise ValueError(
+                f"network preset {preset!r} not available; known presets: "
+                f"{sorted(PRESETS)} (set config['network_preset'] or pass "
+                f"an explicit 'initial')")
+        infer = StokesInference(preset=preset, device=str(self.device),
+                                verbose=False)
+        scale = infer.input_scale
+        if scale is None:
+            raise ValueError(
+                "the network preset defines no input scale; pass an "
+                "explicit 'initial' atmosphere or set config['atmosphere'] "
+                "to a preset name")
+        nb, nw, ncomp = target.shape
+        if self.verbose:
+            print(f"[spot] default initial guess: network preset '{preset}' "
+                  f"({nb} profiles)", flush=True)
+        try:
+            out = infer.predict_numpy(
+                (target.detach().cpu().numpy() * float(scale)))
+        except Exception as exc:
+            raise ValueError(
+                "the 'auto' network initial guess failed: the preset "
+                f"'{preset}' expects (B, 112, 4) profiles got "
+                f"({nb}, {nw}, {ncomp}). Pass an explicit 'initial' "
+                "atmosphere or set config['atmosphere'] to a preset name "
+                f"(e.g. 'hot11')") from exc
+
+        net_grid = _np.linspace(-4.0, 2.0, 64)       # index 0 = top layer
+        ltau_np = ltau.detach().cpu().numpy()
+        x_tgt_inc = ltau_np[::-1]                    # increasing (for interp)
+        cols = []
+        for key, q in (("t", "T"), ("p", "Pe"), ("b", "B"), ("g", "gamma"),
+                       ("f", "phi"), ("v", "vlos")):
+            y_inc = _np.asarray(out[key], dtype=float)   # (Nb, 64), top first
+            if q == "vlos":
+                y_inc = y_inc * 1e-5                     # cm/s -> km/s
+            vals = interp_to_grid(net_grid, y_inc, x_tgt_inc,
+                                  method="linear")[:, ::-1]  # deepest first
+            cols.append(_np.ascontiguousarray(vals))
+        vmic = _np.asarray(out["m"], dtype=float).reshape(nb) * 1e-5
+        vmac = _np.asarray(out["M"], dtype=float).reshape(nb) * 1e-5
+        atmos = _np.concatenate(cols + [vmic[:, None], vmac[:, None]],
+                                axis=1)
+        return torch.as_tensor(atmos, dtype=self.dtype, device=self.device)
+
+    # ------------------------------------------------------------------
     # public API
     # ------------------------------------------------------------------
     def invert(self, wavs, ltau, target, initial=None, sigma=None):
@@ -148,8 +226,8 @@ class Inversion:
         initial : torch.Tensor (Nb, Nx) or str or dict, optional
             Initial-guess atmosphere.  A string is interpreted as a
             preset model name (e.g. 'hot11', 'FALC11'); a dict from
-            ``load_atmosphere`` is also accepted.  Defaults to the
-            config preset ``config['atmosphere']``.
+            ``load_atmosphere`` is also accepted.  Defaults to
+            ``config['atmosphere']`` ('auto' = network initial guess).
         sigma : torch.Tensor or float, optional
             Noise level per Stokes sample.  Shape (4, Nw), (Nb, 4, Nw)
             or a scalar.  Default 'auto': 1e-3 * max|I| per batch.
@@ -168,7 +246,7 @@ class Inversion:
         nx = 6 * nt + 2
 
         if initial is None:
-            initial = self.config["atmosphere"]
+            initial = self._default_initial(wavs, ltau, target)
         atmos = self.synthesis._normalize_atmos(initial, ltau)
         if atmos.shape[1] == 7 * nt + 1:
             # Convention: microturbulence is ONE parameter (a single

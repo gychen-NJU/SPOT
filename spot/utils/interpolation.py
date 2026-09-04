@@ -51,11 +51,13 @@ def interp_to_grid(x_source, y_source, x_target, method="linear"):
         raise ValueError("need at least 2 source points")
 
     if method == "linear":
-        out = np.interp(x_t, x_s, y_s, left=None, right=None)
-        if y_s.ndim > 1:
-            out = np.stack([np.interp(x_t, x_s, y_s[i], left=None, right=None)
-                            for i in range(y_s.shape[0])], axis=0)
-        return out
+        # np.interp only accepts 1-D values; flatten the leading dims of
+        # y (any shape (..., Ns)), interpolate every row, reshape back.
+        lead = y_s.shape[:-1]
+        flat = y_s.reshape(-1, y_s.shape[-1])
+        out = np.stack([np.interp(x_t, x_s, flat[i], left=None, right=None)
+                        for i in range(flat.shape[0])])
+        return out.reshape(*lead, x_t.shape[0])
 
     if method == "cubic":
         return _cubic_with_extrapolation(x_s, y_s, x_t)

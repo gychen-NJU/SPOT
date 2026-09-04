@@ -198,7 +198,7 @@ class CmaesInversion(Inversion):
         nt = ltau.shape[0]
 
         if initial is None:
-            initial = self.config["atmosphere"]
+            initial = self._default_initial(wavs, ltau, target)
         atmos = self.synthesis._normalize_atmos(initial, ltau)
         if atmos.shape[0] == 1 and nb > 1:
             atmos = atmos.repeat(nb, 1)
