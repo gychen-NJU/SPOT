@@ -30,7 +30,7 @@ def collect_data_files(root):
     return entries
 
 
-# get the long description from the README (bilingual, UTF-8)
+# get the long description from the README (primary language, UTF-8)
 with open("README.md", encoding="utf-8") as fh:
     long_description = fh.read()
 
