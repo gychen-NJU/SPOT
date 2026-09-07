@@ -1,4 +1,4 @@
-"""spot.net.model — StokesPHNO, a parallel hybrid neural operator for Stokes inversion.
+"""spot.net.model — SPOT, Spectrapolarimetric Operator Transformer
 
 Architecture (faithful re-implementation of the proven v7 design):
   1. input projection + sinusoidal positional encoding
