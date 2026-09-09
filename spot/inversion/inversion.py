@@ -111,6 +111,13 @@ class Inversion:
         self.lambda_factor = float(inv["lambda_factor"])
         self.lambda_decrease = float(inv["lambda_decrease"])
         self.max_step = inv["max_step"]
+        # Physical bounds on the trial parameter values (see default.py):
+        # the magnetic field strength must stay on its positive branch and
+        # the inclination inside [0, 180] deg, because the Zeeman effect
+        # is degenerate under (B, gamma, phi) -> (-B, 180-gamma, phi+180)
+        # and B = 0 is the singular point of that degeneracy.
+        self.min_value = inv.get("min_value") or {}
+        self.max_value = inv.get("max_value") or {}
         self.hse_pg0 = float(inv.get("hse_pg0", 0.0))
         self.stokes_weights = inv["stokes_weights"]
         # Per-physical-quantity singular-value truncation (groups).  A
@@ -454,6 +461,16 @@ class Inversion:
         node_idx = torch.cat(idx) if idx else torch.empty(0, dtype=torch.long)
         return names, node_idx, modes, caps, blocks
 
+    def _param_bounds(self, names):
+        """Per-parameter (min_value, max_value) lists for marquardt_step.
+
+        Built from ``config['inversion']['min_value'] / ['max_value']``
+        (quantity -> bound, None = unbounded) and aligned with ``names``.
+        """
+        lo = [self.min_value.get(n) for n in names]
+        hi = [self.max_value.get(n) for n in names]
+        return lo, hi
+
     # ------------------------------------------------------------------
     def _run_cycle(self, wavs, ltau, target, sigma, atmos, nodes_cfg,
                    auto_set, icycle):
@@ -506,6 +523,17 @@ class Inversion:
             return g or None
 
         groups = _groups(blocks)
+
+        def _bounds(names_now):
+            """Physical (min, max) bounds aligned with ``names_now``.
+
+            Recomputed every time the layout changes (the automatic-node
+            reselection rebuilds ``names``), so the bound lists always
+            match the parameter vector length.
+            """
+            return self._param_bounds(names_now)
+
+        _bmin, _bmax = _bounds(names)
 
         # initial node values: direct sampling from the grid.  NOTE
         # (reference parity): the cycle baseline stays the RAW input
@@ -571,6 +599,7 @@ class Inversion:
                 names, node_idx, modes, caps, blocks = \
                     self._param_layout(counts, nt)
                 groups = _groups(blocks)
+                _bmin, _bmax = _bounds(names)
                 nparams = len(names)
                 params = self._extract_nodes(ltau, atmos, blocks,
                                              node_idx, nt)
@@ -605,6 +634,7 @@ class Inversion:
                     names, node_idx, modes, caps, blocks = \
                         self._param_layout(counts, nt)
                     groups = _groups(blocks)
+                    _bmin, _bmax = _bounds(names)
                     nparams = len(names)
                     # Re-extract the node values from the accepted
                     # atmosphere with the new layout and rebuild the
@@ -691,7 +721,9 @@ class Inversion:
                              dtype=self.dtype),
                 torch.ones(1, device=self.device, dtype=self.dtype))
             trial_params = marquardt_step(params, delta, modes, caps,
-                                          additive_factor=angle_factor)
+                                          additive_factor=angle_factor,
+                                          min_value=_bmin,
+                                          max_value=_bmax)
             # guard against non-finite parameter values (reject the step)
             bad_param = ~torch.isfinite(trial_params)
             trial_params = torch.where(bad_param, params, trial_params)
@@ -713,6 +745,7 @@ class Inversion:
                 counts = counts_accept
                 names, node_idx, modes, caps, blocks = \
                     self._param_layout(counts, nt)
+                _bmin, _bmax = _bounds(names)
                 params = self._extract_nodes(ltau, atmos, blocks, node_idx,
                                              nt)
                 _record(False)
@@ -872,6 +905,24 @@ class Inversion:
                                                 node_idx[i0:i1])
                                   - nodes_to_grid(ltau, cur_a,
                                                   node_idx[i0:i1]))
+                    # Physical bound on the FINAL grid.  The node values
+                    # are already bounded by marquardt_step, but the
+                    # not-a-knot cubic can OVERSHOOT between nodes: with
+                    # few nodes in the upper atmosphere the spline of the
+                    # magnetic field dipped to -22 G two layers above a
+                    # node (fixed 4-cycle run, layers 46-47), i.e. the
+                    # negative-field symptom the node bound alone does not
+                    # remove.  Applying the same bound to the grid is what
+                    # SIR does implicitly (its parameters live on the
+                    # spline, and B is only ever used through B*cos/sin),
+                    # and it is a no-op whenever the spline stays inside
+                    # the bound.
+                    lo_q = self.min_value.get(q)
+                    hi_q = self.max_value.get(q)
+                    if lo_q is not None:
+                        grid = grid.clamp(min=float(lo_q))
+                    if hi_q is not None:
+                        grid = grid.clamp(max=float(hi_q))
             else:
                 grid = _qslice(atmos, q, nt)     # fixed quantity: keep as is
             cols.append(grid)

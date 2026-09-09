@@ -168,6 +168,30 @@ DEFAULT_CONFIG = {
             "T": None, "Pe": 0.25, "B": None, "gamma": None, "phi": None,
             "vlos": None, "vmic": None, "vmac": None,
         },
+        # physical bounds on the trial parameter values.  The Zeeman
+        # effect enters the radiative transfer only through B*cos(gamma)
+        # and B*sin(gamma)*cos(2 phi) (synthesis.py), so the field strength
+        # and the inclination are DEGENERATE: (B, gamma, phi) and
+        # (-B, 180-gamma, phi+180) give the identical Stokes vector.
+        # B = 0 is a singular point of that degeneracy, where the response
+        # function changes sign and a Gauss-Newton step may flip the
+        # solution onto the equivalent branch (the origin of the reported
+        # negative field strengths).  Projecting the trial values onto the
+        # physical branch removes the singularity without changing the
+        # model space:
+        #   B     in [0, inf)   -- positive branch
+        #   gamma in [0, 180]   -- with B >= 0 this already covers every
+        #                          field direction (B*cos gamma is signed)
+        #   phi   in [0, 180]   -- only cos(2 phi) enters, so phi and
+        #                          phi+180 are the same physical state;
+        #                          180 is the field's azimuth ambiguity
+        #                          (a run without this bound wound up to
+        #                          phi = 6258 deg)
+        # Set a bound to None to disable it.
+        "min_value": {"T": None, "Pe": None, "B": 1e-6, "gamma": 0.0,
+                      "phi": 0.0, "vlos": None, "vmic": None, "vmac": None},
+        "max_value": {"T": None, "Pe": None, "B": None, "gamma": 180.0,
+                      "phi": 180.0, "vlos": None, "vmic": None, "vmac": None},
         "svd_tolerance": 1e-4,          # singular-value threshold (relative),
                                         # the reference default (tol = 1e-4)
         "sigma": "sir",                 # noise per Stokes sample: 'auto'

@@ -122,7 +122,7 @@ def solve_damped_svd(alpha, beta, lamda, tolerance=1e-4, groups=None):
 
 
 def marquardt_step(params, delta, update_mode, max_step=None,
-                   additive_factor=None):
+                   additive_factor=None, min_value=None, max_value=None):
     """
     Apply the Marquardt correction to the parameters.
 
@@ -141,6 +141,18 @@ def marquardt_step(params, delta, update_mode, max_step=None,
         (a_new = a + da*factor); the angle channels carry the delta in
         RADIANS while the angle parameters are per-DEGREE, so the
         factor is 180/pi for gamma/phi and 1.0 elsewhere.
+    min_value, max_value : list of float (Np,) or None
+        Optional per-parameter bounds on the TRIAL value.  A bound is a
+        genuine trust-region restriction, not a cosmetic clamp: the
+        trial parameter is projected onto the bound, so the step is
+        truncated along the offending direction only.  They are used to
+        keep the magnetic field strength on its positive branch and the
+        angles inside their physical range (see
+        :meth:`spot.inversion.inversion.Inversion._run_cycle`).
+
+    Returns
+    -------
+    torch.Tensor (Nb, Np) — the trial parameter vector.
     """
     trial = params.clone()
     for j in range(params.shape[1]):
@@ -157,4 +169,8 @@ def marquardt_step(params, delta, update_mode, max_step=None,
                 f = float(additive_factor[j]) if torch.is_tensor(
                     additive_factor) else float(additive_factor)
             trial[:, j] = params[:, j] + dj * f
+        if min_value is not None and min_value[j] is not None:
+            trial[:, j] = trial[:, j].clamp(min=float(min_value[j]))
+        if max_value is not None and max_value[j] is not None:
+            trial[:, j] = trial[:, j].clamp(max=float(max_value[j]))
     return trial

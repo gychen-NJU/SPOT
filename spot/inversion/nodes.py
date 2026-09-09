@@ -140,10 +140,21 @@ def node_grid_weights(ltau, node_idx):
     # --- evaluate at every depth point --------------------------------
     # splines22: y(x) = f1 y_j1 + f2 y_j2 + f3 m'_j1 + f4 m'_j2
     # with f1 = 1-t, f2 = t, f3 = f1*(f1^2-1), f4 = f2*(f2^2-1).
+    #
+    # NOTE (SIR parity): SIR evaluates the cubic on the LAST segment for
+    # every depth point beyond the last node (its j1 = 1+int(...) is not
+    # clamped, so t keeps growing and the spline EXTRAPOLATES).  spot
+    # clamps the segment index for safety (out-of-range gather) but must
+    # NOT clamp t itself: clamping t to [0, 1] collapses the weights to
+    # the last node value and silently drops the extrapolation.  This is
+    # visible whenever the node set does not reach the surface, e.g. 5
+    # nodes on the 55-layer grid cover log tau = 1.4 .. -3.8 while the
+    # grid runs to -4.0: the two top layers then disagreed with SIR by up
+    # to 0.59 in a spline weight (checked against splines22/SPLINB in
+    # audit/step13_spline_parity.py).
     paso = h[0].clamp(min=1e-12)
     j1 = (x / paso).floor().long().clamp(0, nn - 2)      # segment start
     t = (x - xn[j1]) / paso
-    t = t.clamp(0.0, 1.0)
     f1 = 1.0 - t
     f2 = t
     f3 = f1 * (f1 * f1 - 1.0)
@@ -309,6 +320,13 @@ def auto_node_count(derivada, mp, ntau):
 
     aijmax = -10.0 * a0
     aijmin = 10.0 * a0
+    # NOTE (SIR parity): criterio.f initialises ``imax=1`` (1-based), i.e.
+    # the 2-node candidate, BEFORE the special split.  With sesgo1 = 0 the
+    # special split's area is identically 0, so ``a > amax`` never fires
+    # and this initial value is what decides the 2-node case: if no
+    # candidate later beats ``amax`` the criterion returns 2 nodes, not 1.
+    # In 0-based terms that is ``imax = 1`` -> ``nod[1] = 2``.
+    imax = 1
     # special 2-node split at i11
     aij = d[0] / 2.0 + d[1:i11].sum() + d[i11] / 2.0
     aij = aij / a0
@@ -326,9 +344,24 @@ def auto_node_count(derivada, mp, ntau):
         imax = 1                                # candidate '2'
 
     # candidate loop: equal-area subintervals
+    #
+    # NOTE (SIR parity): the candidate list is nod[0]=1, nod[1]=2,
+    # nod[2]=3, ...  SIR's loop is ``do i=2,nummax2`` in 1-based terms,
+    # i.e. it starts at nodosposibles(2) = 2 and never re-tests the
+    # 1-node entry (which is handled by the ``a1 == 1`` early return).
+    # In 0-based terms that is ``range(2, nummax2 + 1)``.  Starting at 1
+    # instead re-evaluates the 2-node candidate with the equal-area
+    # rule (a DIFFERENT expression from the special split above) and
+    # usually yields the largest area, so the criterion systematically
+    # returned 2 nodes; measured against a literal port of criterio.f it
+    # agreed only 190/300 times (audit/step15_auto_nodes.py).
+    # NOTE (SIR parity, second bug): ``imax`` was reset to 0 here, which
+    # threw away the ``imax = 1`` set by the special 2-node branch above.
+    # SIR keeps ``imax`` from that branch into the candidate loop, so a
+    # derivative whose 2-node split is the best split must return 2; the
+    # reset made it return 1 whenever no candidate beat it.
     best = amax
-    imax = 0                                    # 0-based; 0 -> count 1
-    for i in range(1, nummax2 + 1):
+    for i in range(2, nummax2 + 1):
         nodc = nod[i]
         if nodc < 2:
             continue

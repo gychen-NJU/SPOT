@@ -17,6 +17,12 @@ outputs/
 *.npz
 *.pdf
 
+# --- LM inversion audit workspace (parity checks vs the SIR2017 reference) ---
+# Local reproduction/verification scripts, logs and dumps; not part of the
+# package.  See the write-up outside the repo:
+#   ../SPOT_LM_inversion_fix.md
+audit/
+
 # --- editor / OS ---
 .vscode/
 .idea/
