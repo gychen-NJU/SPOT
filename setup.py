@@ -36,7 +36,7 @@ with open("README.md", encoding="utf-8") as fh:
 
 setup(
     name="spot",
-    version="1.1.0",
+    version="1.1.1",
     description=(
         "Integrated Stokes spectral synthesis and inversion library: "
         "batched GPU/CPU synthesis of Stokes IQUV, response functions, "
