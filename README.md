@@ -2,35 +2,48 @@
 
 # SPOT
 
-**Stokes Profile Optimization Toolkit** — 面向太阳偏振光谱的 Stokes IQUV 谱线合成与反演库（含神经算子子包）
+**Spectrapolarimetric Operator Transformer** — a PyTorch-based library for Stokes IQUV spectral synthesis and inversion (with a neural-operator subpackage)
 
-[English](README.en.md) | [简体中文](README.md)
+[English](README.md) | [简体中文](README.zh.md)
 
 </div>
 
-### 概述
+### Overview
 
-`spot` 是一个基于 PyTorch 的太阳偏振光谱（Stokes IQUV）合成与反演库。它以纯 Python / PyTorch（NumPy）实现 LTE 大气中谱线形成的完整物理链路（不透明度、Zeeman 线型、辐射转移方程求解等），并内置节点化反演、无导数优化与神经算子网络反演等多种方法，支持 CPU / GPU。
+`spot` is a Python library for solar Stokes (polarized) spectral synthesis
+and inversion. It implements the LTE line-formation physics (opacity, Zeeman
+line profiles, radiative-transfer solvers, etc.) in pure Python / PyTorch
+(NumPy), and bundles several inversion strategies — node-parameterized
+Levenberg–Marquardt, derivative-free CMA-ES, and a pretrained
+neural-operator network — on CPU or CUDA.
 
-核心功能：
+Capabilities:
 
-1. **正向合成**：任意大气模型（内置预设 + 自定义 CSV）、任意谱线列表、任意波长网格下，批量（batch）合成 Stokes I、Q、U、V 谱线，支持 CPU / GPU（PyTorch 向量化）；
-2. **响应函数**：dI/dx（对大气参数）自动微分 / 有限差分 / 解析链式法则多种方法，默认 `fast` 方法精确且高效；
-3. **反演**：节点化大气参数化 + Levenberg–Marquardt（阻尼 SVD）多循环反演；另有 CMA-ES（无导数）批量反演用于初值搜索；
-4. **网络反演**：`spot.net.StokesInference` 加载预训练神经算子（FNO + Transformer + DeepONet 风格解码器），一键对 Hinode SP 配置的 Stokes 谱进行反演。
+1. **Forward synthesis** of Stokes I, Q, U, V for arbitrary atmosphere
+   models (packed presets or custom CSV), line lists and wavelength grids,
+   vectorized over batches on CPU / CUDA (PyTorch);
+2. **Response functions** dI/dx with several methods (autograd, finite
+   differences, analytic chain rule); the default `fast` method is exact
+   and efficient;
+3. **Inversion**: node-parametrized atmosphere + Levenberg–Marquardt
+   (damped SVD) multi-cycle inversion; plus **CMA-ES** (derivative-free)
+   batched inversion for initial-guess search;
+4. **Network inversion**: `spot.net.StokesInference` loads the pretrained
+   neural operator (FNO + Transformer + DeepONet-style decoder) and
+   inverts Hinode SP configured Stokes profiles in one call.
 
-### 安装
+### Installation
 
 ```bash
 cd SPOT
-pip install -e .          # 或 pip install .（完整安装，含 spot.net 预训练模型）
+pip install -e .          # or pip install . (includes the spot.net pretrained model)
 ```
 
-依赖：`numpy`、`torch>=2.0`、`matplotlib`（见 `requirements.txt`）。
+Dependencies: `numpy`, `torch>=2.0`, `matplotlib` (see `requirements.txt`).
 
-### 快速上手
+### Quick start
 
-#### 1. 正向合成（Hinode SP 配置示例）
+#### 1. Forward synthesis (Hinode SP configuration)
 
 ```python
 import numpy as np
@@ -38,13 +51,11 @@ import torch
 from spot import Synthesis
 from spot.utils.data_io import load_atmosphere
 
-# Hinode SP 窗口：112 个采样，6300.8840305 .. 6303.2759695 A，步长 21.549 mA
 wavs = torch.tensor(6300.8840305 + 21.549e-3 * np.arange(112), dtype=torch.float64)
 
-model = load_atmosphere("cool11")          # 预设大气（55 层，log tau 递减）
+model = load_atmosphere("cool11")          # preset atmosphere (55 layers)
 ltau = torch.tensor(model["ltau"], dtype=torch.float64)
 
-# 打包大气向量：[T, Pe, B, gamma, phi, vlos] x Nt + [vmic, vmac]（km/s）
 nt = len(model["ltau"])
 atmos = torch.tensor(np.concatenate(
     [model["T"], model["Pe"], model["B"], model["gamma"],
@@ -59,43 +70,44 @@ syn = Synthesis({
 stokes = syn(wavs, ltau, atmos)             # (1, 112, 4): I, Q, U, V
 ```
 
-#### 2. 响应函数（默认 `fast`）
+#### 2. Response functions (default `fast`)
 
 ```python
 stokes, rf = syn(wavs, ltau, atmos, return_rf=True)
-print(rf.shape)   # (1, 112, 4, 6*Nt+2)，dI/dx 对打包大气向量
+print(rf.shape)   # (1, 112, 4, 6*Nt+2): dI/dx wrt the packed atmosphere
 ```
 
-#### 3. 反演（默认推荐流程：网络初猜 → 4 轮节点 LM，一键调用）
+#### 3. Inversion (default recommended flow: network guess -> 4-cycle node LM)
 
 ```python
 from spot import Inversion
 
-# 不传任何 inversion 设置即可使用默认推荐配置：
-#   atmosphere='auto'（先用 spot.net 的 hinode_sp 网络反演目标谱线得到初猜）
-#   + 4 轮节点表 [2,3,4,auto]（T/B/gamma/phi/vlos）
-#   + fast 响应函数 + sigma='sir' (snr=1000) + 权重 1:5:5:10 + 无 hse
-# Hinode SP 测试算例上：chi2 ≈ 0.05-0.06，约 130 s
-# （对照：hot11 初猜 + 老默认 + hse 的完整 4 轮反演 ~2500 s，chi2 ~7e-2）
-res = Inversion().invert(wavs, ltau, target)   # initial=None -> 网络初猜
-print(res.chi2, res.atmos)                     # (Nb,) chi2 与最终大气
+# No inversion settings needed - the defaults are the recommended flow:
+#   atmosphere='auto' (the spot.net hinode_sp network inverts the target
+#   profiles first) + 4-cycle node schedule [2,3,4,auto] (T/B/gamma/phi/vlos)
+#   + fast response functions + sigma='sir' (snr=1000) + weights 1:5:5:10
+#   + no hse.  Hinode SP test case: chi2 ~ 0.05-0.06 in ~130 s
+#   (vs ~2500 s / chi2 ~7e-2 for the traditional 4-cycle flow with a preset
+#   initial guess and hse).
+res = Inversion().invert(wavs, ltau, target)   # initial=None -> network guess
+print(res.chi2, res.atmos)                     # (Nb,) chi2 + final atmosphere
 
-# 想回到传统初猜（如 hot11）或指定别的初猜：
+# Traditional preset initial guess (e.g. hot11) or explicit initial:
 res = Inversion().invert(wavs, ltau, target, initial="hot11")
 ```
 
-如果需要更极致精度：`config["inversion"] = {"nodes": {..., "auto"}, "hse_pg0": 500}` 等变体
-可在 demo/08_net_guess_search 中对比参考（chi2 ~2e-2，~890 s）。
+For maximum accuracy see the variant matrix in demo/08_net_guess_search
+(e.g. automatic nodes + hse=500: chi2 ~2e-2 in ~890 s).
 
-#### 3b. 反演（自定义：CMA-ES 初值搜索 + LM 自动节点数）
+#### 3b. Inversion (custom: CMA-ES warm start + LM with automatic node counts)
 
 ```python
 from spot import CmaesInversion, Inversion
 
-cfg = {...}   # 与合成相同的基础配置
+cfg = {...}   # same base configuration as the synthesis
 cfg["inversion"] = {
     "nodes": {"T": 4, "Pe": 0, "B": 3, "gamma": 2, "phi": 2,
-              "vlos": 3, "vmic": 1, "vmac": 1},   # 少量节点
+              "vlos": 3, "vmic": 1, "vmac": 1},   # coarse node layout
     "max_cycles": 1,
 }
 res_a = CmaesInversion(cfg).invert(wavs, ltau, target, initial="hot11")
@@ -108,54 +120,71 @@ cfg["inversion"] = {
 res_b = Inversion(cfg).invert(wavs, ltau, target, initial=res_a.atmos)
 ```
 
-#### 4. 网络反演（预训练 `hinode_sp`）
+#### 4. Network inversion (pretrained `hinode_sp`)
 
 ```python
 from spot.net import StokesInference
 
 infer = StokesInference(preset="hinode_sp", device="cuda")
-out = infer.predict_numpy(stokes_phys)      # 输入需为物理单位强度
-# out: t,p,b,g,f,v (B,64) + m,M (B,)；t [K], p [dyn/cm^2], b [G],
-#      g [deg], f [deg](-180,180], v/m/M [cm/s]
+out = infer.predict_numpy(stokes_phys)      # input must be physical intensity
+# out: t,p,b,g,f,v (B,64) + m,M (B,); t [K], p [dyn/cm^2], b [G],
+#      g [deg], f [deg] (-180,180], v/m/M [cm/s]
 ```
 
-### 目录结构
+### Layout
 
 ```
 spot/
-├── __init__.py             # 顶层导出（Synthesis, Inversion, CmaesInversion, ...）
-├── config.py               # 配置合并/冻结
-├── default.py              # 默认配置（单位说明 + 所有可选项）
-├── visualization.py        # 收敛曲线绘图
-├── data/                   # 预设大气模型、谱线表、丰度表、不透明度表
-├── physics/                # 原子数据、不透明度、Zeeman 线型、RTE 求解器、热力学、压力平衡...
-├── synthesis/              # Synthesis：正向合成 + 响应函数
+├── __init__.py             # top-level exports (Synthesis, Inversion, CmaesInversion, ...)
+├── config.py               # config merge/freeze utilities
+├── default.py              # default configuration (units + all options)
+├── visualization.py        # convergence plots
+├── data/                   # preset atmospheres, line list, abundances, opacity tables
+├── physics/                # atomic data, opacity, Zeeman line profiles, RTE solvers, thermodynamics, pressure...
+├── synthesis/              # Synthesis: forward synthesis + response functions
 ├── inversion/              # Inversion (LM), CmaesInversion, marquardt, nodes
-├── utils/                  # data_io（预设/文件加载）、interpolation
-└── net/                    # 神经算子子包（StokesInference, 训练/评估...）
-    └── models/hinode_sp/   # 预训练模型（best_model.pt / config.json / norm_stats.pt）
+├── utils/                  # data_io (presets/files), interpolation
+└── net/                    # neural-operator subpackage (StokesInference, training/eval...)
+    └── models/hinode_sp/   # pretrained model (best_model.pt / config.json / norm_stats.pt)
 ```
 
-### 配置要点（`spot.default.DEFAULT_CONFIG`）
+### Key configuration (`spot.default.DEFAULT_CONFIG`)
 
-* 单位：波长 [Angstrom]，`ltau = log10(tau5000)`，T [K]，Pe [dyn/cm²]，B [G]，角度 [deg]，速度 [km/s]；
-* 大气向量：`[T, Pe, B, gamma, phi, vlos (每层) , vmic(标量), vmac(标量)]`，`Nx = 6*Nt + 2`；
-* 合成：`solver`（hermitian/cn/delo）、`continuum_opacity`（mihalas/atlas/opacity_project）、`macroturbulence`、`normalize_continuum`、`rf_method`（fast/autograd/analytic/analytic_chain/finite_diff）；
-* 反演：`atmosphere='auto'`（默认：先调 `spot.net` 网络（`network_preset`）对目标谱线反演出初猜）＋ `nodes`（每量的节点数，list = 每循环一个值，`"auto"` = 自动节点数）、`max_cycles=4`、`max_iterations=80`、`sigma='sir'`+`snr=1000`+`stokes_weights=[1,5,5,10]`、`hse_pg0=0`（默认推荐流程，详见快速上手 3）、`lambda0/lambda_factor`（LM 阻尼）、`svd_tolerance`；
-* CMA-ES：`population`、`sigma0`、`scale`、`bounds`、`covariance_mode`、`stall`、`hse_refresh`。
+* Units: wavelength [Angstrom], `ltau = log10(tau5000)`, T [K], Pe [dyn/cm^2],
+  B [G], angles [deg], velocities [km/s];
+* Atmosphere vector: `[T, Pe, B, gamma, phi, vlos (per layer), vmic (scalar),
+  vmac (scalar)]`, `Nx = 6*Nt + 2`;
+* Synthesis: `solver` (hermitian/cn/delo), `continuum_opacity`
+  (mihalas/atlas/opacity_project), `macroturbulence`, `normalize_continuum`,
+  `rf_method` (fast/autograd/analytic/analytic_chain/finite_diff);
+* Inversion: `atmosphere='auto'` (default: the `spot.net` operator
+  (`network_preset`) inverts the target profiles first for the initial
+  guess) + `nodes` (nodes per quantity; list = one value per cycle,
+  `"auto"` = automatic node counts), `max_cycles=4`, `max_iterations=80`,
+  `sigma='sir'`+`snr=1000`+`stokes_weights=[1,5,5,10]`, `hse_pg0=0`
+  (the default recommended flow, see quick start 3),
+  `lambda0/lambda_factor` (LM damping), `svd_tolerance`;
+* CMA-ES: `population`, `sigma0`, `scale`, `bounds`, `covariance_mode`,
+  `stall`, `hse_refresh`.
 
-### 数据与预设
+### Data and presets
 
-* 大气预设：`hot11`、`cool11`、`falc11`、`falf11`、`hsra11`、`valc11`、`granulebbr` 等（`spot/data/models/*.csv`）；
-* 谱线表：`spot/data/lines.csv`（含 Fe I 6301.508/6302.499 等）；
-* 丰度表：`thevenin`（`spot/data/abundance.csv`）；
-* 不透明度：`mihalas`（默认）／`atlas`（ATLAS 太阳 ODF）／`opacity_project`；
-* 网络预设：`spot.net` 自带 `hinode_sp`（Hinode SP Fe I 6301.5/6302.5 微调模型）。
+* Atmosphere presets: `hot11`, `cool11`, `falc11`, `falf11`, `hsra11`,
+  `valc11`, `granulebbr`, ... (`spot/data/models/*.csv`);
+* Line list: `spot/data/lines.csv` (includes Fe I 6301.508/6302.499);
+* Abundance table: `thevenin` (`spot/data/abundance.csv`);
+* Continuum opacity: `mihalas` (default) / `atlas` (ATLAS solar ODF) /
+  `opacity_project`;
+* Network preset: `spot.net` bundles `hinode_sp` (fine-tuned on Hinode SP
+  Fe I 6301.5/6302.5 profiles).
 
-### 演示与验证
+### Demos and validation
 
-`demo/` 目录包含端到端演示（正向合成、响应函数、节点化反演（LM / CMA-ES）、网络反演及组合流程），每个演示生成图与详细报告（`demo/reports/`）。详见 `demo/README.md`。
+The `demo/` directory contains end-to-end demos (forward synthesis, response
+functions, node-based inversion with LM / CMA-ES, network inversion, and
+combined flows), each producing figures and a detailed report under
+`demo/reports/`. See `demo/README.md`.
 
-### 许可
+### License
 
-MIT（作者 Guoyin Chen，gychen@smail.nju.edu.cn）。
+MIT (author Guoyin Chen, gychen@smail.nju.edu.cn).
