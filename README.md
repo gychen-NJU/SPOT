@@ -129,7 +129,14 @@ infer = StokesInference(preset="hinode_sp", device="cuda")
 out = infer.predict_numpy(stokes_phys)      # input must be physical intensity
 # out: t,p,b,g,f,v (B,64) + m,M (B,); t [K], p [dyn/cm^2], b [G],
 #      g [deg], f [deg] (-180,180], v/m/M [cm/s]
+# depth axis: index 0 = shallowest (log tau5000 = -4) ... 63 = deepest (+2)
 ```
+
+The bundled `hinode_sp` network is **v3 (2026-09-12), trained from scratch** on 2.36M
+BIFROST 1-D atmospheres plus 519k SIR-inverted Hinode SP profiles (50 epochs); it
+replaces the earlier fine-tuned checkpoint, which is kept under
+`spot/net/models/deprecated/hinode_sp_v1/` for provenance only (no preset loads it).
+Details, training data, accuracy and limitations: `spot/net/models/hinode_sp/MODEL_CARD.md`.
 
 ### Layout
 
@@ -145,7 +152,10 @@ spot/
 ├── inversion/              # Inversion (LM), CmaesInversion, marquardt, nodes
 ├── utils/                  # data_io (presets/files), interpolation
 └── net/                    # neural-operator subpackage (StokesInference, training/eval...)
-    └── models/hinode_sp/   # pretrained model (best_model.pt / config.json / norm_stats.pt)
+    └── models/
+        ├── hinode_sp/           # current model (best_model.pt / config.json / norm_stats.pt)
+        │                        #   + MODEL_CARD.md
+        └── deprecated/          # old checkpoints, kept for provenance, not loaded by any preset
 ```
 
 ### Key configuration (`spot.default.DEFAULT_CONFIG`)
@@ -175,8 +185,9 @@ spot/
 * Abundance table: `thevenin` (`spot/data/abundance.csv`);
 * Continuum opacity: `mihalas` (default) / `atlas` (ATLAS solar ODF) /
   `opacity_project`;
-* Network preset: `spot.net` bundles `hinode_sp` (fine-tuned on Hinode SP
-  Fe I 6301.5/6302.5 profiles).
+* Network preset: `spot.net` bundles `hinode_sp`, the current model (v3, 2026-09-12:
+  BIFROST simulations + SIR-inverted Hinode SP profiles, trained from scratch for
+  50 epochs) — see `spot/net/models/hinode_sp/MODEL_CARD.md`.
 
 ### Demos and validation
 

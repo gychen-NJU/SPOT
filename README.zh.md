@@ -117,7 +117,13 @@ infer = StokesInference(preset="hinode_sp", device="cuda")
 out = infer.predict_numpy(stokes_phys)      # 输入需为物理单位强度
 # out: t,p,b,g,f,v (B,64) + m,M (B,)；t [K], p [dyn/cm^2], b [G],
 #      g [deg], f [deg](-180,180], v/m/M [cm/s]
+# 深度轴：index 0 = 最浅层（log tau5000 = -4）… 63 = 最深层（+2）
 ```
+
+自带的 `hinode_sp` 网络现为 **v3（2026-09-12，从随机初始化训练）**：236 万条 BIFROST 一维大气
+＋ 51.9 万条 SIR 反演得到的 Hinode SP 大气（正演合成后）训练 50 epoch。此前的微调权重已被
+取代，仅保留在 `spot/net/models/deprecated/hinode_sp_v1/`（仅存档，没有任何预设会加载它）。
+训练数据、精度与已知限制见 `spot/net/models/hinode_sp/MODEL_CARD.md`。
 
 ### 目录结构
 
@@ -133,7 +139,10 @@ spot/
 ├── inversion/              # Inversion (LM), CmaesInversion, marquardt, nodes
 ├── utils/                  # data_io（预设/文件加载）、interpolation
 └── net/                    # 神经算子子包（StokesInference, 训练/评估...）
-    └── models/hinode_sp/   # 预训练模型（best_model.pt / config.json / norm_stats.pt）
+    └── models/
+        ├── hinode_sp/           # 当前模型（best_model.pt / config.json / norm_stats.pt）
+        │                        #   + MODEL_CARD.md
+        └── deprecated/          # 旧权重，仅存档，不被任何预设加载
 ```
 
 ### 配置要点（`spot.default.DEFAULT_CONFIG`）
@@ -150,7 +159,7 @@ spot/
 * 谱线表：`spot/data/lines.csv`（含 Fe I 6301.508/6302.499 等）；
 * 丰度表：`thevenin`（`spot/data/abundance.csv`）；
 * 不透明度：`mihalas`（默认）／`atlas`（ATLAS 太阳 ODF）／`opacity_project`；
-* 网络预设：`spot.net` 自带 `hinode_sp`（Hinode SP Fe I 6301.5/6302.5 微调模型）。
+* 网络预设：`spot.net` 自带 `hinode_sp`（当前版本 v3：BIFROST 模拟 ＋ SIR 反演的 Hinode SP 大气，从随机初始化训练 50 epoch；详见 `spot/net/models/hinode_sp/MODEL_CARD.md`）。
 
 ### 演示与验证
 

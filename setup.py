@@ -36,7 +36,7 @@ with open("README.md", encoding="utf-8") as fh:
 
 setup(
     name="spot",
-    version="1.1.1",
+    version="1.2.0",
     description=(
         "Integrated Stokes spectral synthesis and inversion library: "
         "batched GPU/CPU synthesis of Stokes IQUV, response functions, "
@@ -62,6 +62,7 @@ setup(
         "spot.net": [
             "models/hinode_sp/*.pt",
             "models/hinode_sp/*.json",
+            "models/hinode_sp/*.md",
         ],
     },
     python_requires=">=3.9",
