@@ -13,14 +13,17 @@ Quick start
 
 Presets
 -------
-  "hinode_sp": fine-tuned on Hinode SP 6301.5/6302.5 observed profiles with
-               labels from a classical Stokes inversion code; the input Stokes
-               intensities are expected in PHYSICAL units and are divided by
-               I_c,ref = 8.257986e14 (k * I_C(HSRA, 6301.508)) inside predict()
-               automatically.
+  "hinode_sp": the current SPOT network (v3, trained from scratch on 2.36M BIFROST
+               1-D atmospheres + 519k SIR-inverted Hinode SP profiles; 50 epochs).
+               The input Stokes intensities are expected in PHYSICAL units and are
+               divided by I_c,ref = 8.257986e14 (k * I_C(HSRA, 6301.508)) inside
+               predict() automatically; pass input_scale=None for already
+               continuum-normalised input.  See
+               spot/net/models/hinode_sp/MODEL_CARD.md.
 
 The azimuth 'f' is returned wrapped to (-180, 180] degrees; velocities (v, m, M)
 are in cm/s as stored in the dataset; t in K, p in dyn/cm^2, b in G, g in deg.
+The depth axis is index 0 = shallowest (log tau5000 = -4) ... 63 = deepest (+2).
 """
 from __future__ import annotations
 
@@ -42,11 +45,13 @@ MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
 PRESETS: Dict[str, dict] = {
     "hinode_sp": {
+        "model_version": "v3-50ep (2026-09-12)",
         "description": (
-            "Fine-tuned on Hinode SP (Fe I 6301.5/6302.5) observed profiles with "
-            "labels from a classical Stokes inversion code. Inputs are expected "
-            "in physical intensity units; they are divided by I_c,ref = 8.257986e14 "
-            "automatically."
+            "Current SPOT network: trained from scratch on 2.36M BIFROST 1-D "
+            "atmospheres + 519k SIR-inverted Hinode SP profiles (50 epochs; "
+            "azimuth folded to [0,180)). Inputs are expected in physical "
+            "intensity units; they are divided by I_c,ref = 8.257986e14 "
+            "automatically. See models/hinode_sp/MODEL_CARD.md."
         ),
         "model": os.path.join(MODELS_DIR, "hinode_sp", "best_model.pt"),
         "norm": os.path.join(MODELS_DIR, "hinode_sp", "norm_stats.pt"),
@@ -54,6 +59,9 @@ PRESETS: Dict[str, dict] = {
         "input_scale": 8.25798607858631e14,   # I_c,ref = k * I_C(HSRA, 6301.508)
     },
 }
+# NOTE: the original fine-tuned checkpoint (bundled up to v1.1.1) is kept under
+# models/deprecated/hinode_sp_v1/ for provenance only -- no preset points there
+# and it is not shipped in the wheel.
 
 
 def list_presets() -> Dict[str, str]:

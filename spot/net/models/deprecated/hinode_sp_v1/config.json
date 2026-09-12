@@ -1,0 +1,47 @@
+{
+  "data_path": "/mn/stornext/u3/guoyinc/Documents/2026/Hinode/data/BandH.pt",
+  "train_ratio": 0.8,
+  "val_ratio": 0.1,
+  "seed": 42,
+  "num_workers": 2,
+  "pin_memory": false,
+  "d_model": 256,
+  "n_fno_layers": 2,
+  "n_transformer_layers": 4,
+  "n_heads": 8,
+  "d_ff": 1024,
+  "dropout": 0.1,
+  "se_reduction": 16,
+  "fno_modes": 16,
+  "out_dims": {
+    "f": 2
+  },
+  "batch_size": 128,
+  "learning_rate": 0.0005,
+  "min_lr_ratio": 0.01,
+  "warmup_epochs": 15,
+  "n_epochs": 300,
+  "weight_decay": 0.0001,
+  "betas": [
+    0.9,
+    0.95
+  ],
+  "grad_clip": 1.0,
+  "amp": true,
+  "loss_weights": {
+    "t": 1.5,
+    "p": 1.5,
+    "b": 1.5,
+    "g": 1.0,
+    "f": 1.0,
+    "v": 1.0,
+    "m": 2.0,
+    "M": 2.0
+  },
+  "save_interval": 10,
+  "early_stop_patience": 50,
+  "early_stop_delta": 1e-07,
+  "plot_interval": 20,
+  "device": "auto",
+  "run_name": "bandh"
+}
