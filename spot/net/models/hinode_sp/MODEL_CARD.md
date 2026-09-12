@@ -23,7 +23,7 @@ atmosphere: `t, p, b, g, f, v` on 64 optical-depth layers plus the scalars
 | source | profiles | role |
 |---|---|---|
 | BIFROST `en024048_hion` 3-D MHD snapshots → 1-D columns after quality cuts | 2,361,889 | 2,300,000 train / 61,889 held-out test |
-| Hinode SP 2017 full map, SIR-inverted atmospheres re-synthesised with SPOT | 519,466 | train |
+| Hinode SP 2017 full map, SIR-inverted atmospheres re-synthesised with SPOT | 519,466 | test |
 
 Every input is a SPOT forward synthesis on a common 64-point log τ₅₀₀₀ ∈ [−4, 2] grid,
 so input/label pairs are exactly self-consistent. Azimuth labels are folded to
